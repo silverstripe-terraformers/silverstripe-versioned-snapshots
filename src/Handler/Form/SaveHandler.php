@@ -3,25 +3,53 @@
 
 namespace SilverStripe\Snapshots\Handler\Form;
 
+use SilverStripe\Forms\Form;
+use SilverStripe\ORM\DataObject;
 use SilverStripe\ORM\ValidationException;
 use SilverStripe\Snapshots\Listener\EventContext;
 use SilverStripe\Snapshots\Snapshot;
+use SilverStripe\Snapshots\SnapshotEvent;
+use SilverStripe\Versioned\Versioned;
 
 class SaveHandler extends Handler
 {
     /**
+     * Avoid recording useless save actions to prevent multiple snapshots of the same version
+     * This feature relies on the published state and will not cover all cases
+     * For example if user is has an unpublished change and save action is called
+     * the action will be recorded as snapshot as we are comparing draft against published state
      * @param EventContext $context
      * @return Snapshot|null
      * @throws ValidationException
      */
     protected function createSnapshot(EventContext $context): ?Snapshot
     {
+        /** @var Form $form */
+        $form = $context->get('form');
 
-        $page = $this->getPage($context);
-        if (!$page || !$page->isModifiedOnDraft()) {
-            return null;
+        if ($form === null) {
+            return parent::createSnapshot($context);
         }
 
-        return parent::createSnapshot($context);
+        /** @var DataObject|Versioned $record */
+        $record = $form->getRecord();
+
+        if ($record === null) {
+            return parent::createSnapshot($context);
+        }
+
+        if (!$record->hasExtension(Versioned::class)) {
+            return parent::createSnapshot($context);
+        }
+
+        if ($record instanceof SnapshotEvent) {
+            return parent::createSnapshot($context);
+        }
+
+        if ($record->isModifiedOnDraft()) {
+            return parent::createSnapshot($context);
+        }
+
+        return null;
     }
 }

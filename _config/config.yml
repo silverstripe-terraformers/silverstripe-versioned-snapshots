@@ -64,12 +64,12 @@ SilverStripe\Core\Injector\Injector:
         formGeneric:
           on:
             'formSubmitted.unpublish': true
-            'formSubmitted.doSave': true
             'formSubmitted.doDelete': true
           handler: %$SilverStripe\Snapshots\Handler\Form\Handler
         save:
           on:
             'formSubmitted.save': true
+            'formSubmitted.doSave': true
           handler: %$SilverStripe\Snapshots\Handler\Form\SaveHandler
         publish:
           on:
