@@ -4,6 +4,7 @@ namespace SilverStripe\Snapshots;
 
 use SilverStripe\Versioned\Versioned;
 use SilverStripe\View\ArrayData;
+use Exception;
 
 class ActivityEntry extends ArrayData
 {
@@ -21,17 +22,10 @@ class ActivityEntry extends ArrayData
 
     public static function createFromSnapshotItem(SnapshotItem $item)
     {
-        if ($item->LinkedToObjectID > 0 && $item->LinkedToObject()->exists()) {
-            return new static([
-                'Subject' => $item->LinkedToObject(),
-                'Action' => $item->WasDeleted ? self::REMOVED : self::ADDED,
-                'Owner' => $item->LinkedFromObject(),
-                'Date' => $item->obj('Created')->Nice(),
-            ]);
-        }
-
         $flag = null;
-        if ($item->WasDeleted) {
+        if ($item->Parent()->exists()) {
+            $flag = $item->WasDeleted ? self::REMOVED : self::ADDED;
+        } elseif ($item->WasDeleted) {
             $flag = self::DELETED;
         } elseif ($item->WasPublished) {
             $flag = self::PUBLISHED;
@@ -49,13 +43,21 @@ class ActivityEntry extends ArrayData
             $previousVersion = Versioned::get_all_versions($item->ObjectClass, $item->ObjectID)
                 ->sort('Version', 'DESC')
                 ->first();
-            if ($previousVersion->exists()) {
+            if ($previousVersion && $previousVersion->exists()) {
                 $itemObj = $item->getItem($previousVersion->Version);
             // This is to deal with the case in which there is no previous version
             // it's better to give a faulty snapshot point than break the app
             } elseif ($item->Version > 1) {
                 $itemObj = $item->getItem($item->Version - 1);
             }
+        }
+
+        if (!$itemObj) {
+            throw new Exception(sprintf(
+                'Could not resolve SnapshotItem %s to a previous %s version',
+                $item->ID,
+                $item->ObjectClass
+            ));
         }
 
         return new static([

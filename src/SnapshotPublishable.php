@@ -26,20 +26,6 @@ class SnapshotPublishable extends RecursivePublishable
     use SnapshotHasher;
 
     /**
-     * Global state to tell all write hooks that a snapshot is in progress.
-     * Prevents recursion and duplicity.
-     * @var Snapshot
-     */
-    protected $activeSnapshot = null;
-
-    /**
-     * Indicates if snapshotting is currently active. Control this state with the ::pause and ::resume methods
-     *
-     * @var bool
-     */
-    protected static $active = true;
-
-    /**
      * @param $class
      * @param $id
      * @param string|int $snapshot A snapshot ID or a Y-m-d h:i:s date formatted string
@@ -61,50 +47,12 @@ class SnapshotPublishable extends RecursivePublishable
 
         $list = DataList::create($baseClass)
             ->setDataQueryParam([
-              'Versioned.mode' => 'archive',
-              'Versioned.date' => $snapshotDate,
-              'Versioned.stage' => Versioned::DRAFT,
+                'Versioned.mode' => 'archive',
+                'Versioned.date' => $snapshotDate,
+                'Versioned.stage' => Versioned::DRAFT,
             ]);
 
         return $list->byID($id);
-    }
-
-    /**
-     * @return bool
-     */
-    public function publishRecursive()
-    {
-        if (!Snapshot::singleton()->isModelTriggerActive()) {
-            return parent::publishRecursive();
-        }
-
-        if (!self::$active) {
-            return parent::publishRecursive();
-        }
-
-        $this->openSnapshot();
-        $result = parent::publishRecursive();
-        $this->closeSnapshot();
-
-        return $result;
-    }
-
-    /**
-     * @param int|string $version
-     */
-    public function rollbackRelations($version)
-    {
-        if (!Snapshot::singleton()->isModelTriggerActive()) {
-            return parent::rollbackRelations($version);
-        }
-
-        if (!self::$active) {
-            return parent::rollbackRelations($version);
-        }
-
-        $this->openSnapshot();
-        parent::rollbackRelations($version);
-        $this->closeSnapshot();
     }
 
     /**
@@ -208,7 +156,7 @@ class SnapshotPublishable extends RecursivePublishable
 
         $hash = static::hashObjectForSnapshot($this->owner);
         $minShot = SQLSelect::create(
-            'MIN("SnapshotID")',
+            "MIN(\"$itemTable\".\"SnapshotID\")",
             "\"$itemTable\"",
             [
                 '"ObjectHash" = ?' => $hash,
@@ -218,7 +166,7 @@ class SnapshotPublishable extends RecursivePublishable
         $minShotSQL = $minShot->sql($minParams);
 
         $maxShot = SQLSelect::create(
-            'MAX("SnapshotID")',
+            "MAX(\"$itemTable\".\"SnapshotID\")",
             "\"$itemTable\"",
             [
                 '"ObjectHash" = ?' => $hash,
@@ -228,28 +176,27 @@ class SnapshotPublishable extends RecursivePublishable
         $maxShotSQL = $maxShot->sql($maxParams);
 
         $condition = $max === null
-            ? sprintf('"SnapshotID" >= (%s)', $minShotSQL)
-            : sprintf('"SnapshotID" BETWEEN (%s) and (%s)', $minShotSQL, $maxShotSQL);
+            ? sprintf("\"$itemTable\".\"SnapshotID\" >= (%s)", $minShotSQL)
+            : sprintf("\"$itemTable\".\"SnapshotID\" BETWEEN (%s) and (%s)", $minShotSQL, $maxShotSQL);
 
         $condtionStatement = [
             $condition => $max === null ? $minParams : array_merge($minParams, $maxParams),
             '"ObjectHash"' => $hash,
             'NOT ("Version" = ? AND "WasPublished" = 1)' => $min,
         ];
-
         if (!$includeAll) {
             $condtionStatement[] = 'Modification = 1';
         }
 
         $query = SQLSelect::create(
-            "\"SnapshotID\"",
+            "\"$itemTable\".\"SnapshotID\"",
             "\"$itemTable\"",
             $condtionStatement
         );
         $sql = $query->sql($params);
 
         return [
-            sprintf('"SnapshotID" IN (%s)', $sql) => $params
+            sprintf("\"$itemTable\".\"SnapshotID\" IN (%s)", $sql) => $params
         ];
     }
 
@@ -265,12 +212,21 @@ class SnapshotPublishable extends RecursivePublishable
 
         $items = SnapshotItem::get()
             ->innerJoin($snapshotTable, "\"$snapshotTable\".\"ID\" = \"$itemTable\".\"SnapshotID\"")
-            ->where(array_merge([
+            ->leftJoin($itemTable, "\"ChildItem\".\"ParentID\" = \"$itemTable\".\"ID\"", "ChildItem")
+            ->where([
+                $this->getSnapshotsBetweenVersionsFilters($min, $max),
                 // Only get the items that were the subject of a user's action
-                "\"$snapshotTable\" . \"OriginHash\" = \"$itemTable\".\"ObjectHash\""
-            ], $this->getSnapshotsBetweenVersionsFilters($min, $max)))
+                "(
+                    \"$snapshotTable\" . \"OriginHash\" = \"$itemTable\".\"ObjectHash\" AND
+                    \"ChildItem\".\"ID\" IS NULL
+                ) OR (
+                    \"$snapshotTable\" . \"OriginHash\" != \"$itemTable\".\"ObjectHash\" AND
+                    \"$itemTable\".\"ParentID\" != 0
+                )"
+            ])
             ->sort([
-                "\"$itemTable\".\"SnapshotID\"" => "ASC"
+                "\"$itemTable\".\"SnapshotID\"" => "ASC",
+                "\"$itemTable\".\"ID\"" => "ASC",
             ]);
 
         return $items;
@@ -290,12 +246,14 @@ class SnapshotPublishable extends RecursivePublishable
                 ->innerJoin($snapshotTable, "\"$snapshotTable\".\"ID\" = \"$itemTable\".\"SnapshotID\"")
                 ->filter([
                     // Only relevant snapshots
-                    'SnapshotID' => $snapShotIDs,
+                    "\"$itemTable\".\"SnapshotID\"" => $snapShotIDs,
+
                 ])
-                ->where(
+                ->whereAny([
                     // Only get the items that were the subject of a user's action
-                    "\"$snapshotTable\" . \"OriginHash\" = \"$itemTable\".\"ObjectHash\""
-                )
+                    "\"$snapshotTable\" . \"OriginHash\" = \"$itemTable\".\"ObjectHash\"",
+                    "\"$itemTable\".\"ParentID\" != 0",
+                ])
                 ->sort([
                     "\"$snapshotTable\".\"Created\"" => "ASC",
                     "\"$snapshotTable\".\"ID\"" => "ASC"
@@ -330,7 +288,6 @@ class SnapshotPublishable extends RecursivePublishable
         $items = $this->getActivityBetweenVersions($minVersion, $maxVersion);
 
         $list = ArrayList::create();
-
         foreach ($items as $item) {
             $list->push(ActivityEntry::createFromSnapshotItem($item));
         }
@@ -395,15 +352,7 @@ class SnapshotPublishable extends RecursivePublishable
             $id = $row['ObjectID'];
             /* @var DataObject|SnapshotPublishable $obj */
             $obj = DataObject::get_by_id($class, $id);
-            if ($obj->isManyManyLinkingObject()) {
-                $ownership = $obj->getManyManyOwnership();
-                foreach ($ownership as $spec) {
-                    list ($parentClass, $parentName, $parent, $child) = $spec;
-                    $map[static::hashObjectForSnapshot($child)] = $child;
-                }
-            } else {
-                $map[static::hashObjectForSnapshot($obj)] = $obj;
-            }
+            $map[static::hashObjectForSnapshot($obj)] = $obj;
         }
 
         return ArrayList::create(array_values($map));
@@ -416,96 +365,6 @@ class SnapshotPublishable extends RecursivePublishable
     public function getAtSnapshot($snapshot)
     {
         return static::get_at_snapshot($this->owner->baseClass(), $this->owner->ID, $snapshot);
-    }
-
-    /**
-     * @return void
-     */
-    public function onAfterWrite()
-    {
-        if (!Snapshot::singleton()->isModelTriggerActive()) {
-            return;
-        }
-
-        if (!$this->requiresSnapshot()) {
-            return;
-        }
-
-        $this->doSnapshot();
-
-        $changes = $this->getChangedOwnership();
-        if (!empty($changes)) {
-            $this->reconcileOwnershipChanges($changes);
-        }
-    }
-
-    /**
-     * @throws Exception
-     */
-    public function onAfterVersionDelete()
-    {
-        if (!Snapshot::singleton()->isModelTriggerActive()) {
-            return;
-        }
-
-        if ($this->requiresSnapshot()) {
-            $this->doSnapshot();
-        }
-    }
-
-    /**
-     * @return SnapshotItem
-     */
-    public function createSnapshotItem()
-    {
-        /* @var DataObject|Versioned|SnapshotPublishable $owner */
-        $owner = $this->owner;
-
-        $record = [
-            'ObjectClass' => $owner->baseClass(),
-            'ObjectID' => $owner->ID,
-            'LinkedObjectClass' => null,
-            'LinkedObjectID' => 0
-        ];
-
-        // Track versioning changes on the record if the owner is versioned
-        if ($owner->hasExtension(Versioned::class)) {
-            $record += [
-                'WasDraft' => $owner->isModifiedOnDraft(),
-                'WasDeleted' => $owner->isOnLiveOnly() || $owner->isArchived(),
-                'Version' => $owner->Version,
-            ];
-        } else {
-            // Track publish state for non-versioned owners, they're always in a published state.
-            $record['WasPublished'] = true;
-        }
-
-        return SnapshotItem::create($record);
-    }
-
-    public function onAfterPublish()
-    {
-        if (!Snapshot::singleton()->isModelTriggerActive()) {
-            return;
-        }
-
-        if ($this->activeSnapshot) {
-            $item = $this->owner->createSnapshotItem();
-            $item->WasPublished = true;
-            $this->activeSnapshot->Items()->add($item);
-        }
-    }
-
-    public function onBeforeRevertToLive()
-    {
-        if (!Snapshot::singleton()->isModelTriggerActive()) {
-            return;
-        }
-
-        if ($this->requiresSnapshot()) {
-            $this->openSnapshot();
-            $this->doSnapshot();
-        }
     }
 
     /**
@@ -522,15 +381,7 @@ class SnapshotPublishable extends RecursivePublishable
     }
 
     /**
-     * @return bool
-     */
-    public function isManyManyLinkingObject()
-    {
-        return !empty($this->owner->getManyManyLinking());
-    }
-
-    /**
-     * @return Generator
+     * @return array
      * @throws Exception
      */
     public function getManyManyOwnership()
@@ -588,6 +439,47 @@ class SnapshotPublishable extends RecursivePublishable
     }
 
     /**
+     * Get the IDs that have been added and removed for each many_many component since the given version
+     * @return array
+     */
+    public function diffManyMany(): array
+    {
+        $owner = $this->owner;
+        $diff = [];
+        // Get the last time this record was in a snapshot. Doesn't matter where or why. We just need a
+        // timestamp prior to now, because the Version may be unchanged.
+        $lastSnapshot = SnapshotItem::get()->filter([
+            'ObjectHash' => static::hashObjectForSnapshot($owner),
+        ])->max('LastEdited');
+        foreach ($owner->config()->get('many_many') as $component => $spec) {
+            $currentIDs = $owner->$component()->column('ID');
+            if ($lastSnapshot) {
+                $previousIDs = Versioned::withVersionedMode(function () use ($lastSnapshot, $owner, $component) {
+                    Versioned::reading_archived_date($lastSnapshot);
+                    return $owner->$component()->column('ID');
+                });
+            } else {
+                $previousIDs = [];
+            }
+
+            $added = array_diff($currentIDs, $previousIDs);
+            $removed = array_diff($previousIDs, $currentIDs);
+            $mmData = $owner->getSchema()->manyManyComponent(get_class($owner), $component);
+
+            if (empty($added) && empty($removed)) {
+                continue;
+            }
+
+            $diff[$mmData['childClass']] = [
+                'added' => $added,
+                'removed' => $removed,
+            ];
+        }
+
+        return $diff;
+    }
+
+    /**
      * @param $snapshot
      */
     public function rollbackOwned($snapshot)
@@ -604,35 +496,6 @@ class SnapshotPublishable extends RecursivePublishable
     }
 
     /**
-     * Pause snapshotting - disabling tracking version changes across a versioned owner relationship tree. This should
-     * only be done in cases where you are manually creating a snapshot (or you are _really_ sure that you don't want a
-     * change to be tracked own "owner"s of a record.
-     */
-    public static function pause()
-    {
-        self::$active = false;
-    }
-
-    /**
-     * Resume snapshotting after previously calling `SnapshotPublishable::pause`.
-     */
-    public static function resume()
-    {
-        self::$active = true;
-    }
-
-    public static function withPausedSnapshots(callable $callback)
-    {
-        try {
-            static::pause();
-
-            return $callback();
-        } finally {
-            static::resume();
-        }
-    }
-
-    /**
      * @param array $snapShotIDs
      * @return SQLSelect
      */
@@ -640,7 +503,6 @@ class SnapshotPublishable extends RecursivePublishable
     {
         $snapshotTable = DataObject::getSchema()->tableName(Snapshot::class);
         $itemTable = DataObject::getSchema()->tableName(SnapshotItem::class);
-        $hash = static::hashObjectForSnapshot($this->owner);
 
         $query = new SQLSelect(
             ['MaxID' => "MAX(\"$itemTable\".\"ID\")"],
@@ -654,7 +516,7 @@ class SnapshotPublishable extends RecursivePublishable
             ['"SnapshotID" IN (' . DB::placeholders($snapShotIDs) . ')' => $snapShotIDs],
             ['"WasPublished" = ?' => 0],
             ['"WasDeleted" = ?' => 0],
-            '"ObjectHash" = "OriginHash"',
+            '"ObjectHash" = "OriginHash" OR "ParentID" != 0',
         ])
             ->setGroupBy(['"ObjectHash"', "\"$itemTable\".\"Created\",  \"$itemTable\".\"ID\""])
             ->setOrderBy("\"$itemTable\".\"Created\",  \"$itemTable\".\"ID\"");
@@ -663,172 +525,39 @@ class SnapshotPublishable extends RecursivePublishable
     }
 
     /**
-     * @return bool
-     */
-    protected function requiresSnapshot()
-    {
-        // Check if snapshotting is currently "paused"
-        if (!self::$active) {
-            return false;
-        }
-
-        $owner = $this->owner;
-
-        // Explicitly blacklist these two, since they get so many writes in this context,
-        // and calculating snapshot eligibility is expensive.
-        if ($owner instanceof Snapshot || $owner instanceof SnapshotItem) {
-            return false;
-        }
-
-        if (!$owner->hasExtension(Versioned::class)) {
-            return false;
-        }
-
-        return !$owner->getNextWriteWithoutVersion();
-    }
-
-    /**
-     * @return void
-     * @throws Exception
-     */
-    protected function doSnapshot()
-    {
-        // Block nested snapshots. One user action = one snapshot
-        if ($this->activeSnapshot) {
-            return null;
-        }
-        $owner = $this->owner;
-        /* @var DataObject|SnapshotPublishable $owner */
-        if ($this->isManyManyLinkingObject()) {
-            foreach ($owner->getManyManyOwnership() as $spec) {
-                /* @var DataObject|SnapshotPublishable $parent */
-                list ($parentClass, $parentName, $parent, $child) = $spec;
-                $this->openSnapshot();
-                $this->addToSnapshot($owner, $parent, $child);
-                foreach ($parent->findOwners() as $owner) {
-                    $this->addToSnapshot($owner);
-                }
-                $this->closeSnapshot();
-            }
-
-            return null;
-        }
-
-        $this->openSnapshot();
-        $this->addToSnapshot($owner);
-
-        foreach ($this->owner->findOwners() as $owner) {
-            $this->addToSnapshot($owner);
-        }
-
-        $this->closeSnapshot();
-    }
-
-    /**
-     * @param $origin
-     * @return Snapshot
-     */
-    protected function createSnapshot($origin = null)
-    {
-        $snapshot = Snapshot::create([
-            'OriginClass' => $origin->baseClass(),
-            'OriginID' => $origin->ID,
-            'AuthorID' => Security::getCurrentUser()
-                ? Security::getCurrentUser()->ID
-                : 0
-        ]);
-
-        return $snapshot;
-    }
-
-    /**
-     * @param null $origin
-     * @return Snapshot
-     */
-    protected function openSnapshot($origin = null)
-    {
-        if (!$origin) {
-            $origin = $this->owner;
-        }
-        $snapshot = $this->createSnapshot($origin);
-        $snapshot->write();
-        $this->activeSnapshot = $snapshot;
-
-        return $snapshot;
-    }
-
-    /**
-     * @param DataObject $obj
-     * @param DataObject|null $linkedFromObj
-     * @param DataObject|null $linkedToObj
-     */
-    protected function addToSnapshot(DataObject $obj, $linkedFromObj = null, $linkedToObj = null)
-    {
-        if (!$this->activeSnapshot) {
-            throw new BadMethodCallException('Cannot call addToSnapshot() before openSnapshot()');
-        }
-
-        if (!$obj->hasExtension(RecursivePublishable::class)) {
-            throw new BadMethodCallException(sprintf(
-                'addToSnapshot() only accepts objects with the %s extension',
-                RecursivePublishable::class
-            ));
-        }
-        /* @var SnapshotPublishable|DataObject $obj */
-        $item = $obj->createSnapshotItem();
-        if ($linkedFromObj) {
-            $item->LinkedFromObjectClass = $linkedFromObj->baseClass();
-            $item->LinkedFromObjectID = $linkedFromObj->ID;
-        }
-        if ($linkedToObj) {
-            $item->LinkedToObjectClass = $linkedToObj->baseClass();
-            $item->LinkedToObjectID = $linkedToObj->ID;
-        }
-
-        $this->activeSnapshot->Items()->add($item);
-    }
-
-    protected function closeSnapshot()
-    {
-        $this->activeSnapshot = null;
-    }
-
-    /**
+     * @param DataObject $previous
      * @return array
      */
-    protected function getChangedOwnership()
+    private function getChangedOwnership(DataObject $previous): array
     {
         $owner = $this->owner;
         $hasOne = $owner->hasOne();
         $fields = array_map(function ($field) {
             return $field . 'ID';
         }, array_keys($hasOne));
-        $changed = $owner->getChangedFields($fields);
         $map = array_combine($fields, array_values($hasOne));
         $result = [];
         foreach ($fields as $field) {
-            if (isset($changed[$field])) {
-                $spec = $changed[$field];
-
-                if (is_null($spec['before']) || is_null($spec['after']) || $spec['before'] == $spec['after']) {
-                    continue;
-                }
-
-                $class = $map[$field];
-
-                if (!$previous = DataObject::get_by_id($class, $spec['before'])) {
-                    continue;
-                }
-
-                if (!$current = DataObject::get_by_id($class, $spec['after'])) {
-                    continue;
-                }
-
-                $result[] = [
-                    'previous' => $previous,
-                    'current' => $current,
-                ];
+            $previousValue = $previous->$field;
+            $currentValue = $owner->$field;
+            if ($previousValue === $currentValue) {
+                continue;
             }
+
+            $class = $map[$field];
+
+            if (!$previousOwner = DataObject::get_by_id($class, $previousValue)) {
+                continue;
+            }
+
+            if (!$currentOwner = DataObject::get_by_id($class, $currentValue)) {
+                continue;
+            }
+
+            $result[] = [
+                'previous' => $previousOwner,
+                'current' => $currentOwner,
+            ];
         }
 
         return $result;
@@ -840,10 +569,14 @@ class SnapshotPublishable extends RecursivePublishable
      * is nothing the user can do about it. Recursive publishing the old owner
      * will not affect this record, as it is no longer in its ownership graph.
      *
-     * @param array $changes
      */
-    protected function reconcileOwnershipChanges($changes)
+    public function reconcileOwnershipChanges(?DataObject $previous = null): void
     {
+        if (!$previous) {
+            return;
+        }
+
+        $changes = $this->getChangedOwnership($previous);
         foreach ($changes as $spec) {
             /* @var DataObject|SnapshotPublishable|Versioned $previousOwner */
             $previousOwner = $spec['previous'];
@@ -883,7 +616,8 @@ class SnapshotPublishable extends RecursivePublishable
                     // Replace them with the new owners
                     /* @var DataObject|SnapshotPublishable $owner */
                     foreach ($currentOwners as $owner) {
-                        $item = $owner->createSnapshotItem();
+                        $item = SnapshotItem::create();
+                        $item->hydrateFromDataObject($owner);
                         $item->SnapshotID = $snapshot->ID;
                         $item->write();
                     }

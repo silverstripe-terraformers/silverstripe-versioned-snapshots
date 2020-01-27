@@ -4,13 +4,19 @@
 namespace SilverStripe\Snapshots\Tests;
 
 use DateTime;
-use SilverStripe\Core\Config\Config;
+use SilverStripe\CMS\Controllers\CMSPageEditController;
+use SilverStripe\CMS\Model\SiteTree;
+use SilverStripe\CMSEvents\Listener\Form\Listener;
 use SilverStripe\Dev\FunctionalTest;
+use SilverStripe\EventDispatcher\Dispatch\Dispatcher;
+use SilverStripe\EventDispatcher\Event\EventContextInterface;
+use SilverStripe\EventDispatcher\Symfony\Event;
+use SilverStripe\Forms\FieldList;
+use SilverStripe\Forms\Form;
 use SilverStripe\ORM\ArrayList;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\ORM\FieldType\DBDatetime;
 use SilverStripe\Snapshots\ActivityEntry;
-use SilverStripe\Snapshots\Snapshot;
 use SilverStripe\Snapshots\SnapshotPublishable;
 use SilverStripe\Snapshots\SnapshotVersioned;
 use SilverStripe\Snapshots\Tests\SnapshotTest\BaseJoin;
@@ -38,12 +44,10 @@ class SnapshotTest extends FunctionalTest
         ChangeSetItem::class,
     ];
 
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        Config::modify()->set(Snapshot::class, 'trigger', Snapshot::TRIGGER_MODEL);
-    }
+    /**
+     * @var SiteTree
+     */
+    private $currentPage;
 
     public function testFundamentals()
     {
@@ -55,27 +59,35 @@ class SnapshotTest extends FunctionalTest
 
         /* @var DataObject|SnapshotPublishable $a1 */
         $a1 = new BlockPage(['Title' => 'A1 Block Page']);
-        $a1->write();
-        $a1->publishRecursive();
+        $this->editingPage($a1);
+        $this->formSaveObject($a1);
+        $this->formPublishObject($a1);
 
         /* @var DataObject|SnapshotPublishable $a2 */
         $a2 = new BlockPage(['Title' => 'A2 Block Page']);
-        $a2->write();
-        $a2->publishRecursive();
+        $this->editingPage($a2);
+        $this->formSaveObject($a2);
+        $this->formPublishObject($a2);
+
+        // A1 Block page edits
+        $this->editingPage($a1);
 
         /* @var DataObject|SnapshotPublishable $a1Block1 */
         $a1Block1 = new Block(['Title' => 'Block 1 on A1', 'ParentID' => $a1->ID]);
-        $a1Block1->write();
+
+        $this->formSaveObject($a1Block1);
         $a1Block2 = new Block(['Title' => 'Block 2 on A1', 'ParentID' => $a1->ID]);
-        $a1Block2->write();
+        $this->formSaveObject($a1Block2);
 
         // A1
         //   block1 (draft, new) *
         //   block2 (draft, new) *
 
+        $this->editingPage($a2);
+
         /* @var DataObject|SnapshotPublishable $a2Block1 */
         $a2Block1 = new Block(['Title' => 'Block 1 on A2', 'ParentID' => $a2->ID]);
-        $a2Block1->write();
+        $this->formSaveObject($a2Block1);
 
         // A1
         //   block1 (draft, new)
@@ -83,8 +95,10 @@ class SnapshotTest extends FunctionalTest
         // A2
         //   block1 (draft, new) *
 
+        $this->editingPage($a1);
+
         $a1->Title = 'A1 Block Page -- changed';
-        $a1->write();
+        $this->formSaveObject($a1);
 
         // A1 (draft, modified) *
         //   block1 (draft, new)
@@ -93,7 +107,7 @@ class SnapshotTest extends FunctionalTest
         //   block1 (draft, new)
 
         $a1Block1->Title = 'Block 1 on A1 -- changed';
-        $a1Block1->write();
+        $this->formSaveObject($a1Block1);
 
         // A1 (draft, modified)
         //   block1 (draft, modified) *
@@ -129,10 +143,12 @@ class SnapshotTest extends FunctionalTest
             ]
         );
 
+        $this->editingPage($a1);
+
         // Testing third level
         /* @var DataObject|SnapshotPublishable|Versioned $gallery1 */
         $gallery1 = new Gallery(['Title' => 'Gallery 1 on Block 1 on A1', 'BlockID' => $a1Block1->ID]);
-        $gallery1->write();
+        $this->formSaveObject($gallery1);
 
         // A1 (draft, modified)
         //   block1 (draft, modified)
@@ -173,7 +189,7 @@ class SnapshotTest extends FunctionalTest
         );
 
         $gallery1->Title = 'Gallery 1 on Block 1 on A1 -- changed';
-        $gallery1->write();
+        $this->formSaveObject($gallery1);
 
         // A1 (draft, modified)
         //   block1 (draft, modified)
@@ -221,8 +237,7 @@ class SnapshotTest extends FunctionalTest
         /* @var DataObject|SnapshotPublishable $galleryItem2 */
         $galleryItem2 = new GalleryImage(['URL' => '/gallery/image/2']);
 
-        $gallery1->Images()->add($galleryItem1);
-        $gallery1->Images()->add($galleryItem2);
+        $this->formSaveRelations($gallery1, 'Images', [$galleryItem1, $galleryItem2]);
 
         // A1 (draft, modified)
         //   block1 (draft, modified)
@@ -245,8 +260,8 @@ class SnapshotTest extends FunctionalTest
                 [$a1Block1, ActivityEntry::MODIFIED],
                 [$gallery1, ActivityEntry::CREATED],
                 [$gallery1, ActivityEntry::MODIFIED],
-                [$galleryItem1, ActivityEntry::ADDED, $gallery1],
-                [$galleryItem2, ActivityEntry::ADDED, $gallery1],
+                [$galleryItem1, ActivityEntry::ADDED],
+                [$galleryItem2, ActivityEntry::ADDED],
             ]
         );
 
@@ -262,10 +277,13 @@ class SnapshotTest extends FunctionalTest
             ]
         );
 
+        $this->editingPage($a2);
+
         /* @var DataObject|SnapshotPublishable $gallery1a */
         $gallery1a = new Gallery(['Title' => 'Gallery 1 on Block 1 on A2', 'BlockID' => $a2Block1->ID]);
-        $gallery1a->write();
-        $gallery1a->Images()->add($galleryItem1);
+        $this->formSaveObject($gallery1a);
+
+        $this->formSaveRelations($gallery1a, 'Images', [$galleryItem1]);
 
         // A1 (draft, modified)
         //   block1 (draft, modified)
@@ -302,7 +320,7 @@ class SnapshotTest extends FunctionalTest
         );
 
         $galleryItem1->URL = '/changed/url';
-        $galleryItem1->write();
+        $this->formSaveObject($galleryItem1);
 
         // A1 (draft, modified)
         //   block1 (draft, modified)
@@ -369,8 +387,10 @@ class SnapshotTest extends FunctionalTest
             ]
         );
 
+        $this->editingPage($a1);
+
         // Publish, and clear the slate
-        $a1->publishRecursive();
+        $this->formPublishObject($a1);
 
         // A1 (published) *
         //   block1 (published) *
@@ -386,7 +406,8 @@ class SnapshotTest extends FunctionalTest
         $this->assertFalse($a1->hasOwnedModifications());
         $this->assertTrue($a2->hasOwnedModifications());
 
-        $a2->publishRecursive();
+        $this->editingPage($a2);
+        $this->formPublishObject($a2);
 
         // A1 (published)
         //   block1 (published)
@@ -415,8 +436,10 @@ class SnapshotTest extends FunctionalTest
         /* @var DataObject|SnapshotVersioned|SnapshotPublishable $gallery1 */
         list ($a1, $a2, $a1Block1, $a1Block2, $a2Block1, $gallery1, $gallery2) = $this->buildState();
 
+        $this->editingPage($a1);
+
         $gallery1->Title = 'Gallery 1 is changed';
-        $gallery1->write();
+        $this->formSaveObject($gallery1);
 
         // A1 (published)
         //   block1 (published)
@@ -454,8 +477,10 @@ class SnapshotTest extends FunctionalTest
         /* @var DataObject|SnapshotVersioned|SnapshotPublishable $gallery1 */
         list ($a1, $a2, $a1Block1, $a1Block2, $a2Block1, $gallery1, $gallery2) = $this->buildState();
 
+        $this->editingPage($a1);
+
         $gallery1->Title = 'Gallery 1 changed';
-        $gallery1->write();
+        $this->formSaveObject($gallery1);
 
         // A1 (published)
         //   block1 (published)
@@ -468,7 +493,7 @@ class SnapshotTest extends FunctionalTest
         $this->assertTrue($a1Block1->hasOwnedModifications());
 
         $a1->Title = 'A1 changed';
-        $a1->write();
+        $this->formSaveObject($a1);
 
         // A1 (draft, modified) *
         //   block1 (published)
@@ -480,7 +505,7 @@ class SnapshotTest extends FunctionalTest
 
 
         // Publish the intermediary block
-        $a1Block1->publishRecursive();
+        $this->formPublishObject($a1Block1);
 
         // A1 (draft, modified)
         //   block1 (published)
@@ -497,7 +522,7 @@ class SnapshotTest extends FunctionalTest
         // Changed block page still does
         $this->assertTrue($a1->hasOwnedModifications());
 
-        $a1->publishRecursive();
+        $this->formPublishObject($a1);
 
         // A1 (published) *
         //   block1 (published)
@@ -510,7 +535,7 @@ class SnapshotTest extends FunctionalTest
         $this->assertFalse($a1->hasOwnedModifications());
 
         $a1Block1->Title = "A1 is changed again";
-        $a1Block1->write();
+        $this->formSaveObject($a1Block1);
 
         // A1 (draft, modified) *
         //   block1 (published)
@@ -531,11 +556,13 @@ class SnapshotTest extends FunctionalTest
         /* @var DataObject|SnapshotVersioned|SnapshotPublishable $gallery2 */
         list ($a1, $a2, $a1Block1, $a1Block2, $a2Block1, $gallery1, $gallery2) = $this->buildState();
 
+        $this->editingPage($a1);
+
         $this->assertFalse($a1->hasOwnedModifications());
         $this->assertFalse($a2->hasOwnedModifications());
 
         $a1Block1->Title = 'Block 1 changed';
-        $a1Block1->write();
+        $this->formSaveObject($a1Block1);
 
         // A1 (published)
         //   block1 (draft, modified) *
@@ -548,8 +575,10 @@ class SnapshotTest extends FunctionalTest
         $this->assertTrue($a1->hasOwnedModifications());
         $this->assertFalse($a2->hasOwnedModifications());
 
+        $this->editingPage($a2);
+
         $a1Block1->ParentID = $a2->ID;
-        $a1Block1->write();
+        $this->formSaveObject($a1Block1);
         $blockMoved = $a1Block1;
 
         // A1 (published)
@@ -561,7 +590,7 @@ class SnapshotTest extends FunctionalTest
         //       gallery1 (published)
 
         // Change of ownership. A1 no longer has modifications, but A2 does.
-        $this->assertFalse($a1->hasOwnedModifications());
+
         $this->assertTrue($a2->hasOwnedModifications());
 
         // A1 doesn't have activity anymore.
@@ -577,8 +606,10 @@ class SnapshotTest extends FunctionalTest
             [$blockMoved, ActivityEntry::MODIFIED],
         ]);
 
-        // This should do nothing. A1 has nothing publishable anymore.
-        $a1->publishRecursive();
+        $this->editingPage($a1);
+
+        // This should do nothing. A1 has nothing publishable anymore.=
+        $this->formPublishObject($a1);
 
         // A1 (published)
         //   block2 (published)
@@ -597,7 +628,9 @@ class SnapshotTest extends FunctionalTest
             [$blockMoved, ActivityEntry::MODIFIED],
         ]);
 
-        $a2->publishRecursive();
+        $this->editingPage($a2);
+
+        $this->formPublishObject($a2);
 
         // A1 (published)
         //   block2 (published)
@@ -610,16 +643,19 @@ class SnapshotTest extends FunctionalTest
         $this->assertEmpty($a2->getActivityFeed());
         $this->assertFalse($a2->hasOwnedModifications());
 
+        $this->editingPage($a2);
+
         $blockMoved->Title = "The moved block is modified";
-        $blockMoved->write();
+        $this->formSaveObject($blockMoved);
 
         $gallery1->Title = "The gallery that belongs to the moved block is modified";
-        $gallery1->write();
+        $this->formSaveObject($gallery1);
 
         $item = new GalleryImage(['URL' => '/belongs/to/moved/block']);
         $item->write();
 
-        $gallery1->Images()->add($item);
+        $this->formSaveRelations($gallery1, 'Images', [$item]);
+
 
         // A1 (published)
         //   block2 (published)
@@ -633,20 +669,21 @@ class SnapshotTest extends FunctionalTest
 
         $this->assertTrue($a2->hasOwnedModifications());
         $this->assertFalse($a1->hasOwnedModifications());
-
         $activity = $a2->getActivityFeed();
         $this->assertCount(3, $activity);
         $this->assertActivityContains($activity, [
             [$blockMoved, ActivityEntry::MODIFIED],
             [$gallery1, ActivityEntry::MODIFIED],
-            [$item, ActivityEntry::ADDED, $gallery1],
+            [$item, ActivityEntry::ADDED],
         ]);
 
         // Move the block back to A1
         // Refresh the block so that changed fields flushes
         $blockMoved = DataObject::get_by_id(Block::class, $blockMoved->ID, false);
         $blockMoved->ParentID = $a1->ID;
-        $blockMoved->write();
+
+        $this->editingPage($a1);
+        $this->formSaveObject($blockMoved);
 
         // A1 (published)
         //   block1-moved-back-to-A1 (draft, modified) *
@@ -670,12 +707,15 @@ class SnapshotTest extends FunctionalTest
         $this->assertActivityContains($activity, [
             [$blockMoved, ActivityEntry::MODIFIED],
             [$gallery1, ActivityEntry::MODIFIED],
-            [$item, ActivityEntry::ADDED, $gallery1],
+            [$item, ActivityEntry::ADDED],
             [$blockMoved, ActivityEntry::MODIFIED],
         ]);
 
-        $a2->publishRecursive();
-        $a1->publishRecursive();
+        $this->editingPage($a2);
+        $this->formPublishObject($a2);
+
+        $this->editingPage($a1);
+        $this->formPublishObject($a1);
 
         // A1 (published)
         //   block1-moved-back-to-A1 (published) *
@@ -692,11 +732,14 @@ class SnapshotTest extends FunctionalTest
         $this->assertEmpty($a2->getActivityFeed());
 
         // Move a many_many
-        $gallery1->Images()->remove($item);
-        $gallery2->Images()->add($item);
+        $this->formSaveRelations($gallery1, 'Images', [$item], ActivityEntry::REMOVED);
+
+        $this->editingPage($a2);
+
+        $this->formSaveRelations($gallery2, 'Images', [$item], ActivityEntry::ADDED);
 
         $item->URL = '/new/url';
-        $item->write();
+        $this->formSaveObject($item);
 
         // A1 (published)
         //   block1-moved-back-to-A1 (published)
@@ -711,13 +754,13 @@ class SnapshotTest extends FunctionalTest
         $activity = $a1->getActivityFeed();
         $this->assertCount(1, $activity);
         $this->assertActivityContains($activity, [
-            [$item, ActivityEntry::REMOVED, $gallery1],
+            [$item, ActivityEntry::REMOVED],
         ]);
 
         $activity = $a2->getActivityFeed();
         $this->assertCount(2, $activity);
         $this->assertActivityContains($activity, [
-            [$item, ActivityEntry::ADDED, $gallery2],
+            [$item, ActivityEntry::ADDED],
             [$item, ActivityEntry::MODIFIED],
         ]);
     }
@@ -732,14 +775,15 @@ class SnapshotTest extends FunctionalTest
 
         // Test that we can transplant a node and relevant activity will be migrated
         // but unrelated activity will be preserved.
+        $this->editingPage($a1);
         $a1Block1->Title = 'Take one for the team';
-        $a1Block1->write();
+        $this->formSaveObject($a1Block1);
 
         $a1Block2->Title = 'You got this';
-        $a1Block2->write();
+        $this->formSaveObject($a1Block2);
 
         $gallery = new Gallery(['Title' => 'A new gallery for block 2', 'BlockID' => $a1Block2->ID]);
-        $gallery->write();
+        $this->formSaveObject($gallery);
 
         // A1 (published)
         //   block1 (draft, modified) *
@@ -760,7 +804,8 @@ class SnapshotTest extends FunctionalTest
 
         // Move one modified block, but leave the other.
         $a1Block2->ParentID = $a2->ID;
-        $a1Block2->write();
+        $this->editingPage($a2);
+        $this->formSaveObject($a1Block2);
 
         // A1 (published)
         //   block1 (draft, modified) *
@@ -798,10 +843,12 @@ class SnapshotTest extends FunctionalTest
         /* @var DataObject|SnapshotVersioned|SnapshotPublishable $gallery2 */
         list ($a1, $a2, $a1Block1, $a1Block2, $a2Block1, $gallery1, $gallery2) = $this->buildState();
 
+        $this->editingPage($a1);
+
         $this->assertFalse($a1->hasOwnedModifications());
         $this->assertFalse($a2->hasOwnedModifications());
 
-        $a1Block1->delete();
+        $this->formDeleteObject($a1Block1);
 
         // A1 (published)
         //   block1 (deleted) *
@@ -817,11 +864,13 @@ class SnapshotTest extends FunctionalTest
             [$a1Block1, ActivityEntry::DELETED],
         ]);
 
+        $this->editingPage($a2);
+
         $a2Block1->Title = 'Change change change';
-        $a2Block1->write();
+        $this->formSaveObject($a2Block1);
 
         $gallery2->Title = 'Changey McChangerson';
-        $gallery2->write();
+        $this->formSaveObject($gallery2);
 
         // A1 (published)
         //   block1 (deleted)
@@ -838,7 +887,7 @@ class SnapshotTest extends FunctionalTest
             [$gallery2, ActivityEntry::MODIFIED],
         ]);
 
-        $a2Block1->delete();
+        $this->formDeleteObject($a2Block1);
         // A1 (published)
         //   block1 (deleted)
         //       gallery1 (published)
@@ -868,6 +917,8 @@ class SnapshotTest extends FunctionalTest
         /* @var DataObject|SnapshotVersioned|SnapshotPublishable $gallery2 */
         list ($a1, $a2, $a1Block1, $a1Block2, $a2Block1, $gallery1, $gallery2) = $this->buildState();
 
+        $this->editingPage($a1);
+
         $this->assertCount(2, $a1->Blocks());
         $this->assertCount(1, $a2->Blocks());
 
@@ -877,40 +928,42 @@ class SnapshotTest extends FunctionalTest
         $stamp1 = $this->sleep(1);
 
         $a1Block1->Title = 'A1 Block 1 changed';
-        $a1Block1->write();
+        $this->formSaveObject($a1Block1);
 
         $stamp2 = $this->sleep(1);
 
         $a1Block2->Title = 'A1 Block 2 changed';
-        $a1Block2->write();
+        $this->formSaveObject($a1Block2);
 
         $stamp3 = $this->sleep(1);
 
         $a1Block1->Title = 'A1 Block 1 changed again';
-        $a1Block1->write();
+        $this->formSaveObject($a1Block1);
 
         $stamp4 = $this->sleep(1);
 
         $gallery1->Title = 'new-gallery title';
-        $gallery1->write();
+        $this->formSaveObject($gallery1);
 
         $stamp5 = $this->sleep(1);
+
+        $this->editingPage($a2);
 
         $a2Block2 = new Block([
             'Title' => 'Block 2 on A2',
             'ParentID' => $a2->ID,
         ]);
 
-        $a2Block2->write();
+        $this->formSaveObject($a2Block2);
 
         $stamp6 = $this->sleep(1);
 
         $a2Block1->Title = 'A2 Block 1 changed';
-        $a2Block1->write();
+        $this->formSaveObject($a2Block1);
 
         $stamp7 = $this->sleep(1);
         $a2->Title = 'The new A2';
-        $a2->write();
+        $this->formSaveObject($a2);
 
         // Sanity check the activity
         $this->assertCount(4, $a1->getActivityFeed());
@@ -986,6 +1039,8 @@ class SnapshotTest extends FunctionalTest
         /* @var DataObject|SnapshotVersioned|SnapshotPublishable $gallery2 */
         list ($a1, $a2, $a1Block1, $a1Block2, $a2Block1, $gallery1, $gallery2) = $this->buildState();
 
+        $this->editingPage($a1);
+
         $this->assertCount(2, $a1->Blocks());
         $this->assertCount(1, $a2->Blocks());
 
@@ -995,40 +1050,42 @@ class SnapshotTest extends FunctionalTest
         $stamp1 = $this->sleep(1);
 
         $a1Block1->Title = 'A1 Block 1 changed';
-        $a1Block1->write();
+        $this->formSaveObject($a1Block1);
 
         $stamp2 = $this->sleep(1);
 
         $a1Block2->Title = 'A1 Block 2 changed';
-        $a1Block2->write();
+        $this->formSaveObject($a1Block2);
 
         $stamp3 = $this->sleep(1);
 
         $a1Block1->Title = 'A1 Block 1 changed again';
-        $a1Block1->write();
+        $this->formSaveObject($a1Block1);
 
         $stamp4 = $this->sleep(1);
 
         $gallery1->Title = 'new-gallery title';
-        $gallery1->write();
+        $this->formSaveObject($gallery1);
 
         $stamp5 = $this->sleep(1);
+
+        $this->editingPage($a2);
 
         $a2Block2 = new Block([
             'Title' => 'Block 2 on A2',
             'ParentID' => $a2->ID,
         ]);
 
-        $a2Block2->write();
+        $this->formSaveObject($a2Block2);
 
         $stamp6 = $this->sleep(1);
 
         $a2Block1->Title = 'A2 Block 1 changed';
-        $a2Block1->write();
+        $this->formSaveObject($a2Block1);
 
         $stamp7 = $this->sleep(1);
         $a2->Title = 'The new A2';
-        $a2->write();
+        $this->formSaveObject($a2);
 
         $stamp8 = $this->sleep(1);
 
@@ -1048,7 +1105,7 @@ class SnapshotTest extends FunctionalTest
         $a2 = $a2->getAtVersion(Versioned::LIVE);
         $this->assertCount(1, $a2->Blocks());
 
-        $a2->publishRecursive();
+        $this->formPublishObject($a2);
 
         // Still has only one block because the draft stage was a rolled back snapshot.
         $this->assertCount(1, $a2->Blocks());
@@ -1057,7 +1114,7 @@ class SnapshotTest extends FunctionalTest
         $this->assertEquals('The new A2', $a2->Title);
         $this->assertCount(2, $a2->Blocks());
 
-        $a2->publishRecursive();
+        $this->formPublishObject($a2);
         $a2 = $a2->getAtVersion(Versioned::LIVE);
         $this->assertCount(2, $a2->Blocks());
     }
@@ -1065,14 +1122,19 @@ class SnapshotTest extends FunctionalTest
     public function testWonkyOwner()
     {
         $page = new BlockPage(['Title' => 'The Page']);
-        $page->write();
-        $page->publishRecursive();
+        $this->editingPage($page);
+        $this->formSaveObject($page);
+        $this->formPublishObject($page);
+
+        // This block is saved in isolation
+        $this->editingPage(null);
 
         $block = new Block(['Title' => 'The Block', 'ParentID' => 0]);
         $block->write();
 
         $block->ParentID = $page->ID;
-        $block->write();
+        $this->editingPage($page);
+        $this->formSaveObject($block);
 
         $activity = $page->getActivityFeed();
         $this->assertCount(1, $activity);
@@ -1087,13 +1149,18 @@ class SnapshotTest extends FunctionalTest
     public function testChangeToUnpublishedOwner()
     {
         $page = new BlockPage(['Title' => 'The Page']);
-        $page->write();
+        $this->editingPage($page);
+
+        $this->formSaveObject($page);
+
+        $this->editingPage(null);
 
         $block = new Block(['Title' => 'The Block']);
         $block->write();
 
+        $this->editingPage($page);
         $block->ParentID = $page->ID;
-        $block->write();
+        $this->formSaveObject($block);
 
         $activity = $page->getActivityFeed();
 
@@ -1110,22 +1177,23 @@ class SnapshotTest extends FunctionalTest
     public function testMany()
     {
         $p = new BlockPage(['Title' => 'The Page']);
-        $p->write();
+        $this->editingPage($p);
+        $this->formSaveObject($p);
 
         $b = new Block(['Title' => 'The Block on The Page', 'ParentID' => $p->ID]);
-        $b->write();
+        $this->formSaveObject($b);
 
         $g = new Gallery(['Title' => 'The Gallery on The Block on The Page', 'BlockID' => $b->ID]);
-        $g->write();
+        $this->formSaveObject($g);
 
-        $p->publishRecursive();
+        $this->formPublishObject($p);
 
         $this->assertFalse($p->hasOwnedModifications());
         $this->assertCount(0, $p->getActivityFeed());
         $this->assertCount(0, $p->getPublishableObjects());
 
         $i = new GalleryImage(['URL' => '/gallery/image/1']);
-        $g->Images()->add($i);
+        $this->formSaveRelations($g, 'Images', [$i]);
 
         $activity = $p->getActivityFeed();
         $this->assertActivityContains(
@@ -1140,14 +1208,15 @@ class SnapshotTest extends FunctionalTest
     public function testPlainActivityFeed()
     {
         $page = new BlockPage();
+        $this->editingPage($page);
         $page->Title = 'The Page -- version 1';
-        $page->write();
+        $this->formSaveObject($page);
 
         $page->Title = 'The Page -- version 2';
-        $page->write();
+        $this->formSaveObject($page);
 
         $page->Title = 'The Page -- version 3';
-        $page->write();
+        $this->formSaveObject($page);
 
         $activity = $page->getActivityFeed();
         $this->assertCount(3, $activity);
@@ -1172,7 +1241,7 @@ class SnapshotTest extends FunctionalTest
             ]
         );
 
-        $page->publishRecursive();
+        $this->formPublishObject($page);
 
         $activity = $page->getActivityFeed();
         $this->assertCount(0, $activity);
@@ -1191,10 +1260,10 @@ class SnapshotTest extends FunctionalTest
         );
 
         $page->Title = 'The Page -- version 5';
-        $page->write();
+        $this->formSaveObject($page);
 
         $page->Title = 'The Page -- version 6';
-        $page->write();
+        $this->formSaveObject($page);
 
         $activity = $page->getActivityFeed();
         $this->assertCount(2, $activity);
@@ -1232,7 +1301,7 @@ class SnapshotTest extends FunctionalTest
             ]
         );
 
-        $page->publishRecursive();
+        $this->formPublishObject($page);
 
         $versionedActivity = $page->getActivityFeed(3);
         $this->assertCount(5, $versionedActivity);
@@ -1251,22 +1320,23 @@ class SnapshotTest extends FunctionalTest
     public function testNestedActivityFeed()
     {
         $p = new BlockPage(['Title' => 'Page -- v01']);
-        $p->write();
+        $this->editingPage($p);
+        $this->formSaveObject($p);
 
         $b = new Block(['Title' => 'Block -- v01', 'ParentID' => $p->ID]);
-        $b->write();
+        $this->formSaveObject($b);
 
         $g = new Gallery(['Title' => 'Gallery -- v01', 'BlockID' => $b->ID]);
-        $g->write();
+        $this->formSaveObject($g);
 
-        $p->publishRecursive();
+        $this->formPublishObject($p);
 
         $this->assertFalse($p->hasOwnedModifications());
         $this->assertCount(0, $p->getActivityFeed());
         $this->assertCount(0, $p->getPublishableObjects());
 
         $i = new GalleryImage(['URL' => '/gallery/image/1']);
-        $g->Images()->add($i);
+        $this->formSaveRelations($g, 'Images', [$i]);
 
         $activity = $p->getActivityFeed();
         $this->assertActivityContains(
@@ -1277,12 +1347,12 @@ class SnapshotTest extends FunctionalTest
         );
 
         $b->Title = 'Block -- v02';
-        $b->write();
+        $this->formSaveObject($b);
 
-        $p->publishRecursive();
+        $this->formPublishObject($p);
 
         $i->URL = '/gallery/image/2';
-        $i->write();
+        $this->formSaveObject($i);
 
         $activity = $p->getActivityFeed();
         $this->assertActivityContains(
@@ -1292,7 +1362,7 @@ class SnapshotTest extends FunctionalTest
             ]
         );
 
-        $p->publishRecursive();
+        $this->formPublishObject($p);
 
         $a = $p->getActivityFeed(2);
         $this->assertActivityContains($a, [
@@ -1325,7 +1395,7 @@ class SnapshotTest extends FunctionalTest
      * @param ArrayList $activity
      * @param array $objs
      */
-    protected function assertActivityContains(ArrayList $activity, $objs = [])
+    private function assertActivityContains(ArrayList $activity, $objs = [])
     {
         $this->assertCount(sizeof($objs), $activity);
         foreach ($activity as $i => $entry) {
@@ -1342,14 +1412,6 @@ class SnapshotTest extends FunctionalTest
                 SnapshotPublishable::hashObjectForSnapshot($entry->Subject)
             );
             $this->assertEquals($action, $entry->Action);
-            if ($owner) {
-                $this->assertNotNull($entry->Owner);
-
-                $this->assertEquals(
-                    SnapshotPublishable::hashObjectForSnapshot($owner),
-                    SnapshotPublishable::hashObjectForSnapshot($entry->Owner)
-                );
-            }
         }
     }
 
@@ -1357,7 +1419,7 @@ class SnapshotTest extends FunctionalTest
      * @param ArrayList $items
      * @param array $objs
      */
-    protected function assertPublishableObjectsContains(ArrayList $items, $objs = [])
+    private function assertPublishableObjectsContains(ArrayList $items, $objs = [])
     {
         $this->assertCount(sizeof($objs), $items);
         foreach ($items as $i => $dataObject) {
@@ -1378,7 +1440,7 @@ class SnapshotTest extends FunctionalTest
      * @param int $minutes
      * @return string
      */
-    protected function sleep($minutes)
+    private function sleep($minutes)
     {
         $now = DBDatetime::now();
         $date = DateTime::createFromFormat('Y-m-d H:i:s', $now->getValue());
@@ -1390,43 +1452,49 @@ class SnapshotTest extends FunctionalTest
     }
 
 
-    protected function buildState($publish = true)
+    private function buildState($publish = true)
     {
         /* @var DataObject|SnapshotPublishable $a1 */
         $a1 = new BlockPage(['Title' => 'A1 Block Page']);
-        $a1->write();
+        $this->editingPage($a1);
+        $this->formSaveObject($a1);
 
         /* @var DataObject|SnapshotPublishable $a2 */
         $a2 = new BlockPage(['Title' => 'A2 Block Page']);
-        $a2->write();
+        $this->editingPage($a2);
+        $this->formSaveObject($a2);
 
+        $this->editingPage($a1);
         /* @var DataObject|SnapshotPublishable $a1Block1 */
         $a1Block1 = new Block(['Title' => 'Block 1 on A1', 'ParentID' => $a1->ID]);
-        $a1Block1->write();
+        $this->formSaveObject($a1Block1);
         $a1Block2 = new Block(['Title' => 'Block 2 on A1', 'ParentID' => $a1->ID]);
-        $a1Block2->write();
+        $this->formSaveObject($a1Block2);
 
+        $this->editingPage($a2);
         /* @var DataObject|SnapshotPublishable $a2Block1 */
         $a2Block1 = new Block(['Title' => 'Block 1 on A2', 'ParentID' => $a2->ID]);
-        $a2Block1->write();
+        $this->formSaveObject($a2Block1);
 
+        $this->editingPage($a1);
         /* @var DataObject|SnapshotPublishable|Versioned $gallery1 */
         $gallery1 = new Gallery(['Title' => 'Gallery 1 on Block 1 on A1', 'BlockID' => $a1Block1->ID]);
-        $gallery1->write();
+        $this->formSaveObject($gallery1);
 
+        $this->editingPage($a2);
         /* @var DataObject|SnapshotPublishable|Versioned $gallery1 */
         $gallery2 = new Gallery(['Title' => 'Gallery 2 on Block 1 on A2', 'BlockID' => $a2Block1->ID]);
-        $gallery2->write();
+        $this->formSaveObject($gallery2);
 
         if ($publish) {
-            $a1->publishRecursive();
-            $a2->publishRecursive();
+            $this->formPublishObject($a1);
+            $this->formPublishObject($a2);
         }
 
         return [$a1, $a2, $a1Block1, $a1Block2, $a2Block1, $gallery1, $gallery2];
     }
 
-    protected function debugActivity($activity)
+    private function debugActivity($activity)
     {
         $list = [];
         foreach ($activity as $entry) {
@@ -1442,7 +1510,7 @@ class SnapshotTest extends FunctionalTest
         return implode("\n", $list);
     }
 
-    protected function debugPublishable($items)
+    private function debugPublishable($items)
     {
         $list = [];
         foreach ($items as $item) {
@@ -1455,5 +1523,91 @@ class SnapshotTest extends FunctionalTest
         }
 
         return implode("\n", $list);
+    }
+
+    private function formSaveObject(DataObject $object)
+    {
+        $object->write();
+        $actionName = $object instanceof SiteTree ? 'save' : 'doSave';
+        $event = $this->createEvent($object, $actionName);
+        $this->dispatch($event);
+    }
+
+    private function formPublishObject(DataObject $object)
+    {
+        $object->write();
+        $object->publishRecursive();
+        $event = $this->createEvent($object, 'publish');
+        $this->dispatch($event);
+    }
+
+    private function formUnpublishObject(DataObject $object)
+    {
+        $object->doUnpublish();
+        $event = $this->createEvent($object, 'unpublish');
+        $this->dispatch($event);
+    }
+
+    private function formDeleteObject(DataObject $object)
+    {
+        $object->doArchive();
+        $event = $this->createEvent($object, 'doDelete');
+        $this->dispatch($event);
+    }
+
+    /**
+     * Relation saves need to be wrapped in NOW() increments because they rely on
+     * timestamp driven history
+     * @param DataObject $object
+     * @param string $component
+     * @param DataObject[] $items
+     * @param string $type
+     */
+    private function formSaveRelations(DataObject $object, $component, array $items, $type = ActivityEntry::ADDED)
+    {
+        $this->sleep(2);
+        $method = $type === ActivityEntry::ADDED ? 'add' : 'remove';
+        foreach ($items as $item) {
+            $object->$component()->$method($item);
+        }
+        $event = $this->createEvent($object, 'doSave');
+        $this->dispatch($event);
+        $this->sleep(2);
+    }
+
+    private function dispatch(EventContextInterface $event)
+    {
+        Dispatcher::singleton()->trigger(Listener::EVENT_NAME, $event);
+    }
+
+    private function createEvent(DataObject $object, string $actionName): Event
+    {
+        if (!$this->currentPage) {
+            return Event::create($actionName);
+        }
+        $form = Form::create(
+            CMSPageEditController::singleton(),
+            'EditForm',
+            FieldList::create(),
+            FieldList::create()
+        );
+
+        $form->loadDataFrom($object);
+        $page = $this->currentPage->isInDB()
+            ? DataObject::get_by_id(get_class($this->currentPage), $this->currentPage->ID)
+            : $this->currentPage;
+
+        return Event::create(
+            $actionName,
+            [
+                'page' => $page,
+                'form' => $form,
+            ]
+        );
+    }
+
+    private function editingPage(?DataObject $page = null)
+    {
+        $this->currentPage = $page;
     }
 }
