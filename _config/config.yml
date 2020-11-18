@@ -65,28 +65,28 @@ SilverStripe\Core\Injector\Injector:
           on:
             'formSubmitted.unpublish': true
             'formSubmitted.doDelete': true
-          handler: %$SilverStripe\Snapshots\Handler\Form\Handler
+          handler: '%$SilverStripe\Snapshots\Handler\Form\Handler'
         save:
           on:
             'formSubmitted.save': true
             'formSubmitted.doSave': true
-          handler: %$SilverStripe\Snapshots\Handler\Form\SaveHandler
+          handler: '%$SilverStripe\Snapshots\Handler\Form\SaveHandler'
         publish:
           on:
             'formSubmitted.publish': true
-          handler: %$SilverStripe\Snapshots\Handler\Form\PublishHandler
+          handler: '%$SilverStripe\Snapshots\Handler\Form\PublishHandler'
         cmsMain:
           on:
             'cmsAction.savetreenode': true
-          handler: %$SilverStripe\Snapshots\Handler\CMSMain\Handler
+          handler: '%$SilverStripe\Snapshots\Handler\CMSMain\Handler'
         gridFieldAction:
           on:
             'gridFieldAlteration.deleterecord': true
             'gridFieldAlteration.archiverecord': true
-          handler: %$SilverStripe\Snapshots\Handler\GridField\Action\Handler
+          handler: '%$SilverStripe\Snapshots\Handler\GridField\Action\Handler'
         graphqlMutation:
           on:
             'graphqlMutation.create': true
             'graphqlMutation.update': true
             'graphqlMutation.delete': true
-          handler: %$SilverStripe\Snapshots\Handler\GraphQL\Mutation\Handler
+          handler: '%$SilverStripe\Snapshots\Handler\GraphQL\Mutation\Handler'
