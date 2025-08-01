@@ -2,10 +2,10 @@
 
 namespace SilverStripe\Snapshots\Handler\GridField\Alteration;
 
+use SilverStripe\Core\Validation\ValidationException;
 use SilverStripe\EventDispatcher\Event\EventContextInterface;
 use SilverStripe\Forms\GridField\GridField;
 use SilverStripe\ORM\DataObject;
-use SilverStripe\ORM\ValidationException;
 use SilverStripe\Snapshots\Handler\HandlerAbstract;
 use SilverStripe\Snapshots\Snapshot;
 use SilverStripe\Versioned\Versioned;

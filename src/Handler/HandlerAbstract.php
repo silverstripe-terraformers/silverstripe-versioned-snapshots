@@ -4,10 +4,10 @@ namespace SilverStripe\Snapshots\Handler;
 
 use SilverStripe\Core\Config\Configurable;
 use SilverStripe\Core\Injector\Injectable;
+use SilverStripe\Core\Validation\ValidationException;
 use SilverStripe\EventDispatcher\Event\EventContextInterface;
 use SilverStripe\EventDispatcher\Event\EventHandlerInterface;
 use SilverStripe\ORM\DataObject;
-use SilverStripe\ORM\ValidationException;
 use SilverStripe\Snapshots\Snapshot;
 use SilverStripe\Versioned\Versioned;
 
@@ -18,27 +18,16 @@ abstract class HandlerAbstract implements EventHandlerInterface
     use Injectable;
 
     /**
-     * @var array
      * @config
      */
-    private static $messages = [];
+    private static array $messages = [];
 
-    /**
-     * @var PageContextProvider
-     */
-    private $pageContextProvider;
+    private ?PageContextProvider $pageContextProvider = null;
 
-    /**
-     * @var array
-     */
-    private static $dependencies = [
+    private static array $dependencies = [
         'PageContextProvider' => '%$' . PageContextProvider::class,
     ];
 
-    /**
-     * @param string $action
-     * @return string
-     */
     protected function getMessage(string $action): string
     {
         $messages = $this->config()->get('messages');

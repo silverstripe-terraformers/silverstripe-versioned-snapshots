@@ -4,9 +4,9 @@ namespace SilverStripe\Snapshots\Handler\CMSMain;
 
 use SilverStripe\CMS\Model\SiteTree;
 use SilverStripe\Control\HTTPResponse;
+use SilverStripe\Core\Validation\ValidationException;
 use SilverStripe\EventDispatcher\Event\EventContextInterface;
 use SilverStripe\ORM\DataObject;
-use SilverStripe\ORM\ValidationException;
 use SilverStripe\Snapshots\Handler\HandlerAbstract;
 use SilverStripe\Snapshots\Snapshot;
 
@@ -32,7 +32,7 @@ class Handler extends HandlerAbstract
             return null;
         }
 
-        if ((int) $result->getStatusCode() !== 200) {
+        if ($result->getStatusCode() !== 200) {
             return null;
         }
 

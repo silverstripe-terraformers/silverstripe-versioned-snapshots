@@ -2,10 +2,11 @@
 
 namespace SilverStripe\Snapshots\Handler\GridField\Action;
 
+use Exception;
+use SilverStripe\Core\Validation\ValidationException;
 use SilverStripe\EventDispatcher\Event\EventContextInterface;
 use SilverStripe\Forms\GridField\GridField;
 use SilverStripe\ORM\DataObject;
-use SilverStripe\ORM\ValidationException;
 use SilverStripe\Snapshots\Snapshot;
 use SilverStripe\Snapshots\SnapshotEvent;
 
@@ -13,6 +14,7 @@ class ReorderHandler extends Handler
 {
     /**
      * @throws ValidationException
+     * @throws Exception
      */
     protected function createSnapshot(EventContextInterface $context): ?Snapshot
     {

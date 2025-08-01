@@ -4,8 +4,8 @@ namespace SilverStripe\Snapshots\Handler\Elemental;
 
 use DNADesign\Elemental\Models\BaseElement;
 use Exception;
+use SilverStripe\Core\Validation\ValidationException;
 use SilverStripe\EventDispatcher\Event\EventContextInterface;
-use SilverStripe\ORM\ValidationException;
 use SilverStripe\Snapshots\Handler\GraphQL\Middleware\Handler;
 use SilverStripe\Snapshots\Snapshot;
 use SilverStripe\Snapshots\SnapshotPublishable;

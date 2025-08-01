@@ -3,9 +3,9 @@
 namespace SilverStripe\Snapshots\Handler\Elemental;
 
 use DNADesign\Elemental\Models\BaseElement;
+use SilverStripe\Core\Validation\ValidationException;
 use SilverStripe\EventDispatcher\Event\EventContextInterface;
 use SilverStripe\ORM\DataObject;
-use SilverStripe\ORM\ValidationException;
 use SilverStripe\Snapshots\Handler\HandlerAbstract;
 use SilverStripe\Snapshots\Snapshot;
 

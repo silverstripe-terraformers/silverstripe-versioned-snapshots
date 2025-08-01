@@ -2,12 +2,11 @@
 
 namespace SilverStripe\Snapshots\Handler\Elemental;
 
-use DNADesign\Elemental\ElementalEditor;
 use DNADesign\Elemental\Extensions\ElementalAreasExtension;
 use DNADesign\Elemental\Models\BaseElement;
 use Exception;
+use SilverStripe\Core\Validation\ValidationException;
 use SilverStripe\EventDispatcher\Event\EventContextInterface;
-use SilverStripe\ORM\ValidationException;
 use SilverStripe\Snapshots\Handler\Form\SaveHandler;
 use SilverStripe\Snapshots\RelationDiffer\RelationDiffer;
 use SilverStripe\Snapshots\Snapshot;
@@ -26,13 +25,6 @@ class PageSaveHandler extends SaveHandler
      */
     protected function createSnapshot(EventContextInterface $context): ?Snapshot
     {
-        // Wonky check for elemental 4.
-        // Elemental < 4 should leave this to the standard page save, which is a separate handler.
-        if (class_exists(ElementalEditor::class)) {
-            // This is also the reason why we need Elemental 4 as a require-dev dependency
-            return null;
-        }
-
         $record = $this->getRecordFromContext($context);
 
         if (!$record) {

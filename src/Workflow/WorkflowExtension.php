@@ -2,24 +2,24 @@
 
 namespace SilverStripe\Snapshots\Workflow;
 
+use SilverStripe\Core\Extension;
 use SilverStripe\EventDispatcher\Dispatch\Dispatcher;
 use SilverStripe\EventDispatcher\Symfony\Event;
-use SilverStripe\ORM\DataExtension;
 use SilverStripe\ORM\DataObject;
 
-class WorkflowExtension extends DataExtension
+class WorkflowExtension extends Extension
 {
-    public function onAfterWorkflowPublish(DataObject $target): void
+    protected function onAfterWorkflowPublish(DataObject $target): void
     {
-        $record = DataObject::get_by_id(get_class($target), $target->ID, false);
+        $record = DataObject::get_by_id($target::class, $target->ID, false);
         Dispatcher::singleton()->trigger('workflowComplete', new Event('publish', [
             'record' => $record,
         ]));
     }
 
-    public function onAfterWorkflowUnpublish(DataObject $target): void
+    protected function onAfterWorkflowUnpublish(DataObject $target): void
     {
-        $record = DataObject::get_by_id(get_class($target), $target->ID, false);
+        $record = DataObject::get_by_id($target::class, $target->ID, false);
         Dispatcher::singleton()->trigger('workflowComplete', new Event('publish', [
             'record' => $record,
         ]));

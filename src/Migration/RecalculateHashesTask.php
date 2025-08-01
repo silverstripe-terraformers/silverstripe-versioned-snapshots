@@ -2,34 +2,24 @@
 
 namespace SilverStripe\Snapshots\Migration;
 
-use SilverStripe\Control\HTTPRequest;
 use SilverStripe\Dev\BuildTask;
 use SilverStripe\ORM\DB;
+use SilverStripe\PolyExecution\PolyOutput;
 use SilverStripe\Snapshots\Snapshot;
 use SilverStripe\Snapshots\SnapshotItem;
+use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\InputInterface;
 use TractorCow\Fluent\Extension\FluentExtension;
 
 class RecalculateHashesTask extends BuildTask
 {
-    /**
-     * @var string
-     */
-    private static $segment = 'recalculate-hashes-task';
+    protected static string $commandName = 'recalculate-hashes-task';
 
-    /**
-     * @var string
-     */
-    protected $title = 'Recalculate OriginHash and ObjectHash';
+    protected string $title = 'Recalculate OriginHash and ObjectHash';
 
-    /**
-     * @var string
-     */
-    protected $description = 'Recalculate all instances of OriginHash and ObjectHash (Fluent support included)';
+    protected static string  $description = 'Recalculate all instances of OriginHash and ObjectHash (Fluent support included)';
 
-    /**
-     * @param HTTPRequest $request
-     */
-    public function run($request): void
+    protected function execute(InputInterface $input, PolyOutput $output): int
     {
         if (class_exists(FluentExtension::class)
             && Snapshot::has_extension(FluentExtension::class)
@@ -50,7 +40,7 @@ class RecalculateHashesTask extends BuildTask
             DB::query($sql);
             echo sprintf('Done, %d records updated.', DB::affected_rows()) . PHP_EOL;
 
-            return;
+            return Command::SUCCESS;
         }
 
         echo 'Updating Snapshots (Non localised)...' . PHP_EOL;
@@ -62,5 +52,7 @@ class RecalculateHashesTask extends BuildTask
         $sql = 'UPDATE "VersionedSnapshotItem" SET "ObjectHash" = MD5(CONCAT("ObjectClass", \':\', "ObjectID"))';
         DB::query($sql);
         echo sprintf('Done, %d records updated.', DB::affected_rows()) . PHP_EOL;
+
+        return Command::SUCCESS;
     }
 }

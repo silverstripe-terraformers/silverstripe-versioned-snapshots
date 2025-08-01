@@ -4,26 +4,20 @@ namespace SilverStripe\Snapshots\Migration;
 
 use Psr\Log\LoggerInterface;
 use ReflectionException;
-use SilverStripe\Core\Injector\Injector;
 use SilverStripe\Dev\BuildTask;
-use SilverStripe\ORM\ValidationException;
+use SilverStripe\PolyExecution\PolyOutput;
+use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\InputInterface;
 
-class Task extends BuildTask
+class PopulateSnapshotsTask extends BuildTask
 {
-    /**
-     * @var string
-     */
-    private static $segment = 'snapshot-migration';
+    protected static string $commandName = 'snapshot-migration';
 
-    /**
-     * @var MigrationService
-     */
-    private $migrator;
+    protected string $title = 'Populate snapshots data';
 
-    /**
-     * @var string
-     */
-    protected $description = 'Migrate _versions tables to snapshots';
+    private MigrationService $migrator;
+
+    protected static string $description = 'Migrate _versions tables to snapshots';
 
     /**
      * MigrationTask constructor.
@@ -37,13 +31,15 @@ class Task extends BuildTask
     }
 
     /**
-     * @param mixed $request
+     * @param InputInterface $input
+     * @param PolyOutput $output
+     * @return int
      * @throws ReflectionException
-     * @throws ValidationException
      */
-    public function run($request): void
+    protected function execute(InputInterface $input, PolyOutput $output): int
     {
-        $logger = Injector::inst()->get(LoggerInterface::class);
+        /** @var LoggerInterface $logger */
+        $logger = singleton(LoggerInterface::class);
 
         $logger->info('Prepping database...');
         $this->migrator->setup();
@@ -58,5 +54,7 @@ class Task extends BuildTask
 
         $this->migrator->seedRelationTracking();
         $this->migrator->tearDown();
+
+        return Command::SUCCESS;
     }
 }

@@ -2,10 +2,11 @@
 
 namespace SilverStripe\Snapshots\Handler\GraphQL\Middleware;
 
+use Exception;
 use GraphQL\Executor\ExecutionResult;
+use SilverStripe\Core\Validation\ValidationException;
 use SilverStripe\EventDispatcher\Event\EventContextInterface;
 use SilverStripe\ORM\DataObject;
-use SilverStripe\ORM\ValidationException;
 use SilverStripe\Snapshots\Handler\HandlerAbstract;
 use SilverStripe\Snapshots\Snapshot;
 use SilverStripe\Snapshots\SnapshotPublishable;
@@ -17,7 +18,7 @@ class RollbackHandler extends HandlerAbstract
      * @param EventContextInterface $context
      * @return Snapshot|null
      * @throws ValidationException
-     * @throws \Exception
+     * @throws Exception
      */
     protected function createSnapshot(EventContextInterface $context): ?Snapshot
     {
@@ -27,7 +28,7 @@ class RollbackHandler extends HandlerAbstract
             return null;
         }
 
-        if (!preg_match('/^rollback/', $action)) {
+        if (!str_starts_with($action, 'rollback')) {
             return null;
         }
 

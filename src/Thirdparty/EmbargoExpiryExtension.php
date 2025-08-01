@@ -2,30 +2,37 @@
 
 namespace SilverStripe\Snapshots\Thirdparty;
 
+use SilverStripe\Core\Extension;
 use SilverStripe\EventDispatcher\Dispatch\Dispatcher;
 use SilverStripe\EventDispatcher\Symfony\Event;
-use SilverStripe\ORM\DataExtension;
 use SilverStripe\ORM\DataObject;
 use Terraformers\EmbargoExpiry\Job\PublishTargetJob;
 use Terraformers\EmbargoExpiry\Job\UnPublishTargetJob;
 
-class EmbargoExpiryExtension extends DataExtension
+/**
+ * @extends Extension<PublishTargetJob>
+ * @extends Extension<UnPublishTargetJob>
+ * @extends Extension<EmbargoExpiryExtension>
+ */
+class EmbargoExpiryExtension extends Extension
 {
-    const EVENT_NAME = 'embargoExpiryJob';
+    const string EVENT_NAME = 'embargoExpiryJob';
 
     /**
      * Extension point in @see PublishTargetJob::process()
      *
      * @param array $options
      */
-    public function afterPublishTargetJob(array $options): void
+    protected function afterPublishTargetJob(array $options): void
     {
+        $owner = $this->getOwner();
+
         Dispatcher::singleton()->trigger(
             static::EVENT_NAME,
             Event::create(
                 'publish',
                 [
-                    'record' => DataObject::get_by_id($this->owner->baseClass(), $this->owner->ID),
+                    'record' => DataObject::get_by_id($owner->baseClass(), $owner->ID),
                     'options' => $options,
                 ]
             )
@@ -37,7 +44,7 @@ class EmbargoExpiryExtension extends DataExtension
      *
      * @param array $options
      */
-    public function afterUnPublishTargetJob(array $options): void
+    protected function afterUnPublishTargetJob(array $options): void
     {
         Dispatcher::singleton()->trigger(
             static::EVENT_NAME,

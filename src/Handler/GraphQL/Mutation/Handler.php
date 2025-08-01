@@ -2,14 +2,14 @@
 
 namespace SilverStripe\Snapshots\Handler\GraphQL\Mutation;
 
+use SilverStripe\Core\Validation\ValidationException;
 use SilverStripe\EventDispatcher\Event\EventContextInterface;
-use SilverStripe\ORM\ValidationException;
 use SilverStripe\Snapshots\Handler\HandlerAbstract;
 use SilverStripe\Snapshots\Snapshot;
 
 class Handler extends HandlerAbstract
 {
-    const ACTION_PREFIX = 'graphql_crud_';
+    const string ACTION_PREFIX = 'graphql_crud_';
 
     /**
      * @param EventContextInterface $context

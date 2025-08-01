@@ -3,10 +3,10 @@
 namespace SilverStripe\Snapshots;
 
 use Exception;
+use SilverStripe\Model\ArrayData;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\ORM\FieldType\DBDatetime;
 use SilverStripe\Versioned\Versioned;
-use SilverStripe\View\ArrayData;
 
 /**
  * @property DataObject|null $Subject

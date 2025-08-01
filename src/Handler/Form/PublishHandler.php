@@ -3,8 +3,8 @@
 namespace SilverStripe\Snapshots\Handler\Form;
 
 use Exception;
+use SilverStripe\Core\Validation\ValidationException;
 use SilverStripe\EventDispatcher\Event\EventContextInterface;
-use SilverStripe\ORM\ValidationException;
 use SilverStripe\Snapshots\Snapshot;
 use SilverStripe\Snapshots\SnapshotHasher;
 use SilverStripe\Versioned\ChangeSet;
@@ -53,8 +53,8 @@ class PublishHandler extends Handler
             }
         }
 
-        foreach ($snapshot->Items() as $i) {
-            $i->WasPublished = true;
+        foreach ($snapshot->Items() as $item) {
+            $item->WasPublished = true;
         }
 
         return $snapshot;

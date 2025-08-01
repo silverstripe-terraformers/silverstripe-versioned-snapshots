@@ -3,8 +3,8 @@
 namespace SilverStripe\Snapshots\Handler\CsvBulkLoader;
 
 use InvalidArgumentException;
+use SilverStripe\Core\Validation\ValidationException;
 use SilverStripe\EventDispatcher\Event\EventContextInterface;
-use SilverStripe\ORM\ValidationException;
 use SilverStripe\Snapshots\Handler\HandlerAbstract;
 use SilverStripe\Snapshots\Snapshot;
 
@@ -24,7 +24,7 @@ class Handler extends HandlerAbstract
         }
 
         // Create an individual snapshot for each object to ensure they're all captured.
-        // Unlike a recursive publish, with imports we rely on all objects noting the action in their history.
+        // Unlike a recursive publishing, with imports we rely on all objects noting the action in their history.
         // The disadvantage of this approach is that the origin of the modification (a CSV import) isn't recorded.
         return Snapshot::singleton()->createSnapshot($obj);
     }

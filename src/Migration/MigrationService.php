@@ -7,9 +7,9 @@ use ReflectionException;
 use SilverStripe\Core\ClassInfo;
 use SilverStripe\Core\Injector\Injectable;
 use SilverStripe\Core\Injector\Injector;
+use SilverStripe\Core\Validation\ValidationException;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\ORM\DB;
-use SilverStripe\ORM\ValidationException;
 use SilverStripe\Snapshots\Snapshot;
 use SilverStripe\Snapshots\SnapshotEvent;
 use SilverStripe\Snapshots\SnapshotItem;
@@ -168,7 +168,7 @@ SQL;
             "
         );
 
-        return (int) DB::affected_rows();
+        return DB::affected_rows();
     }
 
     /**
@@ -214,7 +214,7 @@ SQL;
             "
         );
 
-        return (int) DB::affected_rows();
+        return DB::affected_rows();
     }
 
     private function createTemporaryTable(): void

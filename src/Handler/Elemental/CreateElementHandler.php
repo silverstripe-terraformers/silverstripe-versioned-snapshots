@@ -3,12 +3,18 @@
 namespace SilverStripe\Snapshots\Handler\Elemental;
 
 use DNADesign\Elemental\Models\ElementalArea;
+use SilverStripe\Core\Validation\ValidationException;
 use SilverStripe\EventDispatcher\Event\EventContextInterface;
 use SilverStripe\Snapshots\Handler\GraphQL\Middleware\Handler;
 use SilverStripe\Snapshots\Snapshot;
 
 class CreateElementHandler extends Handler
 {
+    /**
+     * @param EventContextInterface $context
+     * @return Snapshot|null
+     * @throws ValidationException
+     */
     protected function createSnapshot(EventContextInterface $context): ?Snapshot
     {
         $action = $context->getAction();
